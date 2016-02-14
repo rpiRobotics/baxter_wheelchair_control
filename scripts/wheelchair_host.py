@@ -17,6 +17,7 @@ import actionlib
 from actionlib_msgs.msg import *
 from geometry_msgs.msg import Twist, Point, Quaternion
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from ar_track_alvar_msgs.msg import AlvarMarkers
 
 wheelchair_servicedef="""
 #Service to provide simple interface to Baxter
@@ -27,9 +28,22 @@ option version 0.4
 object Wheelchair
 property double[] current_pose
 property uint8 goal_completed
+property uint8[] current_marker_state
+property uint8 current_marker
 
 event goal_inactive()
 event goal_reached()
+
+event ar_marker_0_active()
+event ar_marker_1_active()
+event ar_marker_2_active()
+event ar_marker_3_active()
+event ar_marker_4_active()
+event ar_marker_0_inactive()
+event ar_marker_1_inactive()
+event ar_marker_2_inactive()
+event ar_marker_3_inactive()
+event ar_marker_4_inactive()
  
 function void setWVWheelchair(double[] command)
 function void go_to_goal(double[] pose)
@@ -55,6 +69,8 @@ class Wheelchair_impl(object):
 	self._track_goal = False
 	self._track_trans = False
 	self._track_rot = False
+	self._markers = [0]*5
+	self._markers_dist = [float("inf")]*5
 
 	# Intialize the goal
         self.goal = MoveBaseGoal()
@@ -80,6 +96,21 @@ class Wheelchair_impl(object):
 
 	# Hook event goal_reached
 	self.goal_reached = RR.EventHook()
+
+	# Hook ar_marker active and inactive events
+	self.ar_marker_0_active = RR.EventHook()
+	self.ar_marker_1_active = RR.EventHook()
+	self.ar_marker_2_active = RR.EventHook()
+	self.ar_marker_3_active = RR.EventHook()
+	self.ar_marker_4_active = RR.EventHook()
+	self.ar_marker_0_inactive = RR.EventHook()
+	self.ar_marker_1_inactive = RR.EventHook()
+	self.ar_marker_2_inactive = RR.EventHook()
+	self.ar_marker_3_inactive = RR.EventHook()
+	self.ar_marker_4_inactive = RR.EventHook()
+
+	# Subscribe to ar track alvar msgs
+	rospy.Subscriber("/ar_pose_marker", AlvarMarkers, self.markers_sub)
                 
         # Start background threads
         self._running = True
@@ -94,6 +125,57 @@ class Wheelchair_impl(object):
         self._running = False
         self._t_command.join()
         self._g_command.join()
+
+    def markers_sub(self, data):
+	for i in range(5): # considering only 5 different markers
+	    visible = False
+	    for j in range(len(data.markers)):
+	    	if i == data.markers[j].id:
+		    visible = True
+		    self._markers_dist[i] = math.hypot(data.markers[j].pose.pose.position.x, data.markers[j].pose.pose.position.y)
+		    if self._markers[i] == 0:
+		    	self.fire_marker_visible(i)
+		    break
+	    if not(visible): 
+		if self._markers[i] == 1:
+		    self._markers_dist[i] = float("inf")
+		    self.fire_marker_hidden(i)
+
+    def fire_marker_visible(self, marker_id):
+	self._markers[marker_id] = 1
+	if marker_id == 0:
+	    self.ar_marker_0_active.fire()
+	if marker_id == 1:
+	    self.ar_marker_1_active.fire()
+	if marker_id == 2:
+	    self.ar_marker_2_active.fire()
+	if marker_id == 3:
+	    self.ar_marker_3_active.fire()
+	if marker_id == 4:
+	    self.ar_marker_4_active.fire()
+	rospy.loginfo("AR tag " + str(marker_id) + " visible")
+
+    def fire_marker_hidden(self, marker_id):
+	self._markers[marker_id] = 0
+	if marker_id == 0:
+	    self.ar_marker_0_inactive.fire()
+	if marker_id == 1:
+	    self.ar_marker_1_inactive.fire()
+	if marker_id == 2:
+	    self.ar_marker_2_inactive.fire()
+	if marker_id == 3:
+	    self.ar_marker_3_inactive.fire()
+	if marker_id == 4:
+	    self.ar_marker_4_inactive.fire()
+	rospy.loginfo("AR tag " + str(marker_id) + " hidden")
+
+    @property 
+    def current_marker_state(self):
+	return self._markers
+
+    @property 
+    def current_marker(self):
+	return numpy.argmin(self._markers_dist)
 
     def setWVWheelchair(self, command):
 	self._wv_wheelchair = command
